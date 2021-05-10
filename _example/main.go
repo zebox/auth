@@ -48,7 +48,7 @@ func main() {
 		AvatarStore:       avatar.NewLocalFS("/tmp/demo-auth-service"), // stores avatars locally
 		AvatarResizeLimit: 200,                                         // resizes avatars to 200x200
 		ClaimsUpd: token.ClaimsUpdFunc(func(claims token.Claims) token.Claims { // modify issued token
-			if claims.User != nil && claims.User.Name == "dev_admin" { // set attributes for dev_admin
+			if claims.User != nil && claims.User.Name == "dev_admin" {          // set attributes for dev_admin
 				claims.User.SetAdmin(true)
 				claims.User.SetStrAttr("custom-key", "some value")
 			}
@@ -79,6 +79,18 @@ func main() {
 	service.AddProvider("github", os.Getenv("AEXMPL_GITHUB_CID"), os.Getenv("AEXMPL_GITHUB_CSEC")) // add github provider
 	service.AddProvider("twitter", os.Getenv("AEXMPL_TWITTER_APIKEY"), os.Getenv("AEXMPL_TWITTER_APISEC"))
 	service.AddProvider("microsoft", os.Getenv("AEXMPL_MS_APIKEY"), os.Getenv("AEXMPL_MS_APISEC"))
+
+	// allow sign with apple id
+	appleCfg := provider.AppleConfig{
+		ClientID: os.Getenv("AEXMPL_APPLE_CID"),
+		TeamID:   os.Getenv("AEXMPL_APPLE_TID"),
+		KeyID:    os.Getenv("AEXMPL_APPLE_KEYID"), // private key identifier
+		Scopes:   []string{"name", "email"},
+	}
+
+	if err := service.AddAppleProvider("apple", appleCfg, provider.LoadApplePrivateKeyFromFile(os.Getenv("AEXMPL_APPLE_PRIVKEY_PATH"))); err != nil {
+		log.Fatalf("[ERROR] create AppleProvider failed: %v", err)
+	}
 
 	// allow anonymous user via custom (direct) provider
 	service.AddDirectProvider("anonymous", anonymousAuthProvider())
