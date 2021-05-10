@@ -3,6 +3,7 @@ package auth
 
 import (
 	"fmt"
+	"golang.org/x/oauth2"
 	"net/http"
 	"strings"
 	"time"
@@ -255,6 +256,26 @@ func (s *Service) AddDevProvider(port int) {
 		Port:        port,
 	}
 	s.providers = append(s.providers, provider.NewService(provider.NewDev(p)))
+}
+
+// AddAppleProvider allow SignIn with Apple ID
+func (s *Service) AddAppleProvider(name string, appleConfig provider.AppleConfig, privKeyLoader provider.PrivateKeyLoaderInterface) error {
+	p := provider.Params{
+		URL:        s.opts.URL,
+		JwtService: s.jwtService,
+		Issuer:     s.issuer,
+		//AvatarSaver: s.avatarProxy, // not implemented avatar for AppleProvider yet
+		L: s.logger,
+	}
+
+	// Error checking at create need for catch one when apple private key init
+	appleProvider, err := provider.NewApple(name, p, appleConfig, oauth2.Endpoint{}, privKeyLoader)
+	if err != nil {
+		return err
+	}
+
+	s.providers = append(s.providers, provider.NewService(appleProvider))
+	return nil
 }
 
 // AddCustomProvider adds custom provider (e.g. https://gopkg.in/oauth2.v3)

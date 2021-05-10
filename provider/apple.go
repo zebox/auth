@@ -67,11 +67,12 @@ type AppleVerificationResponse struct {
 
 // AppleConfig is the main oauth2 required parameters for "Sign in with Apple"
 type AppleConfig struct {
-	ClientID           string // the identifier Services ID for your app created in Apple developer account.
-	TeamID             string // developer Team ID (10 characters), required for create JWT. It available, after signed in at developer account, by link: https://developer.apple.com/account/#/membership
-	KeyID              string // private key ID  assigned to private key obtain in Apple developer account
-	UserAgent          string // UserAgent value for Apple API request. Default: "github.com/go-pkgz/auth"
-	ClientSecretExpire int64  // time in seconds for client secret expired (default: 24h)
+	ClientID           string   // the identifier Services ID for your app created in Apple developer account.
+	TeamID             string   // developer Team ID (10 characters), required for create JWT. It available, after signed in at developer account, by link: https://developer.apple.com/account/#/membership
+	KeyID              string   // private key ID  assigned to private key obtain in Apple developer account
+	UserAgent          string   // UserAgent value for Apple API request. Default: "github.com/go-pkgz/auth"
+	ClientSecretExpire int64    // time in seconds for client secret expired (default: 24h)
+	Scopes             []string // for apple provider allow only "email" and "name" scope values
 
 	privateKey   interface{} // private key from Apple obtained in developer account (the keys section). Required for create the Client Secret (https://developer.apple.com/documentation/sign_in_with_apple/generate_and_validate_tokens#3262048)
 	clientSecret string      // is the JWT client secret will create after first call and then used until expired
@@ -85,9 +86,9 @@ type AppleHandler struct {
 	name string
 	// infoURL  string not implemented at Apple side
 	endpoint oauth2.Endpoint
-	scopes   []string                       // for apple provider allow only "email" and "name" scope values
-	mapUser  func(jwt.MapClaims) token.User // map info from InfoURL to User
-	conf     AppleConfig
+
+	mapUser func(jwt.MapClaims) token.User // map info from InfoURL to User
+	conf    AppleConfig
 
 	PrivateKeyLoader PrivateKeyLoaderInterface // custom function interface for load private key
 
@@ -128,7 +129,10 @@ func (lf LoadFromFileFunc) LoadPrivateKey() ([]byte, error) {
 	return keyValue, nil
 }
 
-func NewApple(name string, p Params, appleCfg AppleConfig, scopes []string, endpoints oauth2.Endpoint, privateKeyLoader PrivateKeyLoaderInterface) (*AppleHandler, error) {
+// NewApple create new AppleProvider with custom name and parameters
+// endpoints used in constructor  required only for testing and can't be define one outside the package
+// Private must be when instance create for use JWT for make request to Apple REST API
+func NewApple(name string, p Params, appleCfg AppleConfig, endpoints oauth2.Endpoint, privateKeyLoader PrivateKeyLoaderInterface) (*AppleHandler, error) {
 
 	if name == "" {
 		return nil, errors.New("empty name for apple provider not allowed")
@@ -158,10 +162,11 @@ func NewApple(name string, p Params, appleCfg AppleConfig, scopes []string, endp
 			KeyID:              appleCfg.KeyID,
 			ClientSecretExpire: appleCfg.ClientSecretExpire,
 			UserAgent:          appleCfg.UserAgent,
+			Scopes:             appleCfg.Scopes,
 		},
 
 		endpoint: endpoints,
-		scopes:   scopes,
+
 		mapUser: func(claims jwt.MapClaims) token.User {
 			var usr token.User
 			if uid, ok := claims["sub"]; ok {
@@ -178,8 +183,6 @@ func NewApple(name string, p Params, appleCfg AppleConfig, scopes []string, endp
 			return usr
 		},
 	}
-
-	ah.scopes = scopes
 
 	if privateKeyLoader == nil {
 		return nil, errors.New("private key loader function undefined")
@@ -361,7 +364,8 @@ func (ah AppleHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	ah.JwtService.Reset(w)
 }
 
-// VerifyWebToken sends the WebValidationTokenRequest and gets validation result
+// exchange sends the validation token request and gets access token and user claims
+// (e.g. https://developer.apple.com/documentation/sign_in_with_apple/generate_and_validate_tokens)
 func (ah *AppleHandler) exchange(ctx context.Context, code, redirectURI string, result interface{}) (err error) {
 
 	// check jwt is expired ang recreate new JWT if need
@@ -492,7 +496,7 @@ func (ah *AppleHandler) prepareLoginURL(state, path string) (string, error) {
 	query.Set("response_type", "code")
 	query.Set("response_mode", "form_post")
 	query.Set("client_id", ah.conf.ClientID)
-	query.Set("scope", extractScopeFn(ah.scopes))
+	query.Set("scope", extractScopeFn(ah.conf.Scopes))
 	query.Set("redirect_uri", ah.makeRedirURL(path))
 	authURL.RawQuery = query.Encode()
 	return authURL.String(), nil
