@@ -291,17 +291,12 @@ func (ah AppleHandler) AuthHandler(w http.ResponseWriter, r *http.Request) {
 	// response with user name filed return only one time at first login, next login  field user doesn't exist
 	// until user delete sign with Apple ID in account profile (security section)
 	// example response: {"name":{"firstName":"Chan","lastName":"Lu"},"email":"user@email.com"}
-	user := r.FormValue("user")
+	jUser := r.FormValue("user") // json string with user name
 
 	oauthClaims, _, err := ah.JwtService.Get(r)
 	if err != nil {
 		rest.SendErrorJSON(w, r, ah.L, http.StatusInternalServerError, err, "failed to get token")
 		return
-	}
-
-	// try parse user name data if it exist in scope and response
-	if user != "" {
-		ah.parseUserData(&oauthClaims, user)
 	}
 
 	if oauthClaims.Handshake == nil {
@@ -334,6 +329,11 @@ func (ah AppleHandler) AuthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u := ah.mapUser(tokenClaims)
+
+	// try parse user name data if it exist in scope and response
+	if jUser != "" {
+		ah.parseUserData(&u, jUser)
+	}
 
 	cid, err := randToken()
 	if err != nil {
@@ -482,7 +482,7 @@ func (ah *AppleHandler) isClientSecretExpired() (bool, error) {
 	}
 	return claims.VerifyExpiresAt(time.Now().Unix(), true), nil
 }
-func (ah *AppleHandler) parseUserData(claims *token.Claims, user string) {
+func (ah *AppleHandler) parseUserData(user *token.User, jUser string) {
 
 	type UserData struct {
 		Name struct {
@@ -493,14 +493,12 @@ func (ah *AppleHandler) parseUserData(claims *token.Claims, user string) {
 	}
 
 	var userData UserData
-	err := json.Unmarshal([]byte(user), &userData)
+	err := json.Unmarshal([]byte(jUser), &userData)
 	if err != nil {
 		ah.L.Logf("[ERROR] failed to parse user data %s: %v", user, err)
 		return
 	}
-	claims.User.Name = fmt.Sprintf("%s %s", userData.Name.FirstName, userData.Name.LastName)
-	claims.User.Email = userData.Email
-
+	user.Name = fmt.Sprintf("%s %s", userData.Name.FirstName, userData.Name.LastName)
 }
 
 func (ah *AppleHandler) prepareLoginURL(state, path string) (string, error) {
