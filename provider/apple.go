@@ -126,6 +126,7 @@ func (lf LoadFromFileFunc) LoadPrivateKey() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	err = kFile.Close()
 	return keyValue, nil
 }
 

@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-type customLoader struct{} // implement custom private key loader interface
+type testCustomLoader struct{} // implement custom private key loader interface
 
 func TestAppleHandler_NewApple(t *testing.T) {
 
@@ -43,7 +43,7 @@ func TestAppleHandler_NewApple(t *testing.T) {
 		ClientSecretExpire: 3600,
 		Scopes:             []string{"name", "email"},
 	}
-	cl := customLoader{}
+	cl := testCustomLoader{}
 
 	ah, err := NewApple("apple-provider-test", p, aCfg, oauth2.Endpoint{}, cl)
 	assert.NoError(t, err)
@@ -83,7 +83,8 @@ Ivx5tHkv
 	}
 
 	defer func() {
-		require.NoError(t, os.RemoveAll(dir))
+		err := os.RemoveAll(dir)
+		require.NoError(t, err)
 	}()
 
 	tmpfn := filepath.Join(dir, testPrivKeyFileName)
@@ -265,7 +266,7 @@ func TestAppleHandler_LogoutHandler(t *testing.T) {
 
 }
 
-func (cl customLoader) LoadPrivateKey() ([]byte, error) {
+func (cl testCustomLoader) LoadPrivateKey() ([]byte, error) {
 
 	// valid p8 key
 	testValidKey := []byte(`-----BEGIN PRIVATE KEY-----
@@ -330,7 +331,7 @@ func prepareAppleHandlerTest() (*AppleHandler, error) {
 		ClientSecretExpire: 3600,
 		Scopes:             []string{"name", "email"},
 	}
-	cl := customLoader{}
+	cl := testCustomLoader{}
 	return NewApple("apple-provider-test", p, aCfg, oauth2.Endpoint{}, cl)
 }
 
