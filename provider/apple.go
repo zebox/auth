@@ -52,7 +52,7 @@ type AppleVerificationResponse struct {
 	// Access token type, always equal the "bearer".
 	TokenType string `json:"token_type"`
 
-	// Access token expires time in seconds.
+	// Access token expires time in seconds. Always equal 3600 seconds (1 hour)
 	ExpiresIn int `json:"expires_in"`
 
 	// The refresh token used to regenerate new access tokens.
@@ -105,7 +105,7 @@ type LoadFromFileFunc struct {
 }
 
 // AppleLoadPrivateKeyFromFile return instance for built-in loader function from local file
-func AppleLoadPrivateKeyFromFile(path string) LoadFromFileFunc {
+func LoadApplePrivateKeyFromFile(path string) LoadFromFileFunc {
 	return LoadFromFileFunc{
 		Path: path,
 	}
@@ -151,6 +151,7 @@ func NewApple(name string, p Params, appleCfg AppleConfig, scopes []string, endp
 	ah := AppleHandler{
 		Params: p,
 		name:   name,
+
 		conf: AppleConfig{
 			ClientID:           appleCfg.ClientID,
 			TeamID:             appleCfg.TeamID,
@@ -158,6 +159,7 @@ func NewApple(name string, p Params, appleCfg AppleConfig, scopes []string, endp
 			ClientSecretExpire: appleCfg.ClientSecretExpire,
 			UserAgent:          appleCfg.UserAgent,
 		},
+
 		endpoint: endpoints,
 		scopes:   scopes,
 		mapUser: func(claims jwt.MapClaims) token.User {
@@ -168,6 +170,10 @@ func NewApple(name string, p Params, appleCfg AppleConfig, scopes []string, endp
 
 			if email, ok := claims["email"]; ok {
 				usr.Email = email.(string)
+			}
+
+			if emailVerified, ok := claims["email_verified"]; ok {
+				usr.SetBoolAttr("email_verified", emailVerified.(string) == "true")
 			}
 			return usr
 		},
@@ -268,9 +274,10 @@ func (ah *AppleHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 // AuthHandler fills user info and redirects to "from" url. This is callback url redirected locally by browser
 // GET /callback
 func (ah AppleHandler) AuthHandler(w http.ResponseWriter, r *http.Request) {
-	// read response data
+
+	// read response form data
 	if err := r.ParseForm(); err != nil {
-		rest.SendErrorJSON(w, r, ah.L, http.StatusForbidden, err, "read callback response from data failed")
+		rest.SendErrorJSON(w, r, ah.L, http.StatusInternalServerError, err, "read callback response from data failed")
 		return
 	}
 
@@ -359,7 +366,7 @@ func (ah *AppleHandler) exchange(ctx context.Context, code, redirectURI string, 
 
 	// check jwt is expired ang recreate new JWT if need
 	ok, err := ah.isClientSecretExpired()
-	if err != nil || ok {
+	if err != nil || !ok {
 		jToken, err := ah.generateClientSecret()
 		if err != nil {
 			return err
@@ -375,7 +382,7 @@ func (ah *AppleHandler) exchange(ctx context.Context, code, redirectURI string, 
 	data.Set("grant_type", "authorization_code")
 
 	client := http.Client{Timeout: time.Second * 5}
-	req, err := http.NewRequestWithContext(ctx, "POST", appleTokenURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", ah.endpoint.TokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return err
 	}
@@ -421,7 +428,9 @@ func (ah AppleHandler) getTokenClaims(idToken string) (jwt.MapClaims, error) {
 // generateClientSecret create the JWT client secret used to make requests to the Apple validation server.
 // for more details go to link: https://developer.apple.com/documentation/sign_in_with_apple/generate_and_validate_tokens#3262048
 func (ah *AppleHandler) generateClientSecret() (string, error) {
-
+	if ah.conf.privateKey == nil {
+		return "", errors.New("private key can't be empty")
+	}
 	// Create the Claims
 	now := time.Now()
 	exp := now.Add(time.Second * 86400).Unix() // default value
@@ -446,7 +455,9 @@ func (ah *AppleHandler) generateClientSecret() (string, error) {
 }
 
 func (ah *AppleHandler) isClientSecretExpired() (bool, error) {
+
 	tkn, _, err := new(jwt.Parser).ParseUnverified(ah.conf.clientSecret, jwt.MapClaims{})
+
 	if err != nil {
 		return false, err
 	}
@@ -454,23 +465,7 @@ func (ah *AppleHandler) isClientSecretExpired() (bool, error) {
 	if !ok {
 		return false, errors.New("can't convert token claims to standard claims")
 	}
-	var expTime int64
-	exp, ok := claims["exp"]
-
-	if !ok {
-		return false, errors.New("exp claim doesn't exist")
-	}
-	switch exp.(type) {
-	case float64:
-		expTime = int64(exp.(float64))
-	case int64:
-		expTime = exp.(int64)
-	}
-	if time.Unix(expTime, 0).Unix() <= time.Now().Unix() {
-		return true, nil
-	}
-
-	return false, nil
+	return claims.VerifyExpiresAt(time.Now().Unix(), true), nil
 }
 
 func (ah *AppleHandler) prepareLoginURL(state, path string) (string, error) {
@@ -487,7 +482,7 @@ func (ah *AppleHandler) prepareLoginURL(state, path string) (string, error) {
 		scopeList = strings.TrimPrefix(scopeList, " ") // trimming scopes delimiter from first item
 		return scopeList
 	}
-	authURL, err := url.Parse(appleAuthUrl)
+	authURL, err := url.Parse(ah.endpoint.AuthURL)
 	if err != nil {
 		return "", err
 	}
