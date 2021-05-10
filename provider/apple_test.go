@@ -2,6 +2,7 @@ package provider
 
 import (
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/oauth2"
 	"io/ioutil"
 	"log"
 	"os"
@@ -13,15 +14,40 @@ type customLoader struct{}
 
 var test *testing.T
 
-func TestAppleHandler_NewAppleProvider(t *testing.T) {
+func TestAppleHandler_NewApple(t *testing.T) {
 
+	testIdToken := `eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ0ZXN0LmF1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMDExMjIuNzg5M2Y3NmViZWRjNDExOGE3OTE3ZGFiOWE4YTllYTkuMTEyMiIsImlzcyI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJleHAiOiIxOTIwNjQ3MTgyIiwiaWF0IjoiMTYyMDYzNzE4MiIsImVtYWlsIjoidGVzdEBlbWFpbC5jb20ifQ.CQCPa7ov-IdZ5bEKfhhnxEXafMAM_t6mj5OAnaoyy0A`
+	p := Params{
+		URL:     "http://localhost",
+		Issuer:  "test-issuer",
+		Cid:     "cid",
+		Csecret: "cs",
+	}
+
+	aCfg := AppleConfig{
+		ClientID:           "auth.example.com",
+		TeamID:             "AA11BB22CC",
+		KeyID:              "BS2A79VCTT",
+		UserAgent:          "test-user-agent",
+		ClientSecretExpire: 3600,
+	}
 	cl := customLoader{}
-	ah, err := NewAppleProvider(AppleHandler{
-		KeyID:            "112233",
-		PrivateKeyLoader: cl,
-	})
+	scopes := []string{"name", "email"}
+	ah, err := NewApple("apple-provider-test", p, aCfg, scopes, oauth2.Endpoint{}, cl)
 	assert.NoError(t, err)
 	assert.IsType(t, &AppleHandler{}, ah)
+	assert.Equal(t, ah.name, "apple-provider-test")
+	assert.Equal(t, ah.conf.ClientID, aCfg.ClientID)
+	assert.NotEmpty(t, ah.conf.privateKey)
+	assert.NotEmpty(t, ah.conf.clientSecret)
+
+	tknClaims, err := ah.getTokenClaims(testIdToken)
+	assert.NoError(t, err)
+
+	u := ah.mapUser(tknClaims)
+	t.Logf("%+v", u)
+	assert.Equal(t, u.ID, "apple_001122.7893f76ebedc4118a7917dab9a8a9ea9.1122")
+	assert.Equal(t, u.Email, "test@email.com")
 
 }
 
@@ -52,21 +78,12 @@ Ivx5tHkv
 		return
 	}
 
-	ah, err := NewAppleProvider(AppleHandler{
-		KeyID:            "11223344",
-		PrivateKeyLoader: AppleLoadPrivateKeyFromFile(tmpfn),
-	})
-
-	assert.NoError(t, err)
-	assert.IsType(t, &AppleHandler{}, ah)
-
-	ah, err = NewAppleProvider(AppleHandler{
-		KeyID:            "11223344",
-		PrivateKeyLoader: AppleLoadPrivateKeyFromFile(testPrivKeyFileName),
-	})
 	assert.Error(t, err)
 }
 
+func TestAppleHandlerGenerateClientSecret(t *testing.T) {
+
+}
 func (cl customLoader) LoadPrivateKey() ([]byte, error) {
 
 	// valid p8 key

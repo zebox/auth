@@ -1,12 +1,14 @@
 // Implementation sign in with Apple for allow users to sign in to web services using their Apple ID.
 // For correct work this provider user must has Apple developer account and correct configure "sign in with Apple" at in
 // See more: https://developer.apple.com/documentation/sign_in_with_apple/sign_in_with_apple_rest_api
+// and https://developer.apple.com/documentation/sign_in_with_apple/sign_in_with_apple_js/incorporating_sign_in_with_apple_into_other_platforms
 package provider
 
 import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"golang.org/x/oauth2"
 
 	"encoding/pem"
 	"errors"
@@ -29,8 +31,8 @@ const (
 	// appleAuthUrl is the base authentication URL for sign in with Apple ID and fetch request code for user validation request.
 	appleAuthUrl = "https://appleid.apple.com/auth/authorize"
 
-	// appleValidationURL is the endpoint for verifying tokens and get user unique ID and E-mail
-	appleValidationURL = "https://appleid.apple.com/auth/token"
+	// appleTokenURL is the endpoint for verifying tokens and get user unique ID and E-mail
+	appleTokenURL = "https://appleid.apple.com/auth/token"
 
 	// apple REST API accept only from-data with it content-type
 	ContentType = "application/x-www-form-urlencoded"
@@ -63,23 +65,31 @@ type AppleVerificationResponse struct {
 	Error string `json:"error"`
 }
 
-// AppleHandler implements login via Apple ID
-type AppleHandler struct {
-	logger.L
-
-	URL                string // main auth domain URI
-	ProviderName       string
-	TokenService       TokenService
-	Scopes             []string                  // for apple provider allow only "email" and "name" scope values
-	ClientID           string                    // the identifier Services ID for your app created in Apple developer account.
-	TeamID             string                    // developer Team ID (10 characters), required for create JWT. It available, after signed in at developer account, by link: https://developer.apple.com/account/#/membership
-	KeyID              string                    // private key ID  assigned to private key obtain in Apple developer account
-	UserAgent          string                    // UserAgent value for Apple API request. Default: "github.com/go-pkgz/auth"
-	PrivateKeyLoader   PrivateKeyLoaderInterface // custom loader function interface
-	ClientSecretExpire int64                     // time in seconds for client secret expired (default: 24h)
+// AppleConfig is the main oauth2 required parameters for "Sign in with Apple"
+type AppleConfig struct {
+	ClientID           string // the identifier Services ID for your app created in Apple developer account.
+	TeamID             string // developer Team ID (10 characters), required for create JWT. It available, after signed in at developer account, by link: https://developer.apple.com/account/#/membership
+	KeyID              string // private key ID  assigned to private key obtain in Apple developer account
+	UserAgent          string // UserAgent value for Apple API request. Default: "github.com/go-pkgz/auth"
+	ClientSecretExpire int64  // time in seconds for client secret expired (default: 24h)
 
 	privateKey   interface{} // private key from Apple obtained in developer account (the keys section). Required for create the Client Secret (https://developer.apple.com/documentation/sign_in_with_apple/generate_and_validate_tokens#3262048)
 	clientSecret string      // is the JWT client secret will create after first call and then used until expired
+}
+
+// AppleHandler implements login via Apple ID
+type AppleHandler struct {
+	Params
+
+	// all of these fields specific to particular oauth2 provider
+	name string
+	// infoURL  string not implemented at Apple side
+	endpoint oauth2.Endpoint
+	scopes   []string                       // for apple provider allow only "email" and "name" scope values
+	mapUser  func(jwt.MapClaims) token.User // map info from InfoURL to User
+	conf     AppleConfig
+
+	PrivateKeyLoader PrivateKeyLoaderInterface // custom function interface for load private key
 
 }
 
@@ -103,8 +113,11 @@ func AppleLoadPrivateKeyFromFile(path string) LoadFromFileFunc {
 
 // LoadPrivateKey implement pre-defined (built-in) PrivateKeyLoaderInterface interface method for load private key from local file
 func (lf LoadFromFileFunc) LoadPrivateKey() ([]byte, error) {
-	keyPath := lf.Path // override input parameters with "Path" field
-	kFile, err := os.Open(keyPath)
+	if lf.Path == "" {
+		return nil, errors.New("empty private key path not allowed")
+	}
+
+	kFile, err := os.Open(lf.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -115,25 +128,68 @@ func (lf LoadFromFileFunc) LoadPrivateKey() ([]byte, error) {
 	return keyValue, nil
 }
 
-func NewAppleProvider(appleSetting AppleHandler) (*AppleHandler, error) {
-	var ah AppleHandler
-	ah = appleSetting
+func NewApple(name string, p Params, appleCfg AppleConfig, scopes []string, endpoints oauth2.Endpoint, privateKeyLoader PrivateKeyLoaderInterface) (*AppleHandler, error) {
 
-	//setting default values
-	if ah.UserAgent == "" {
-		ah.UserAgent = defaultUserAgent
+	if name == "" {
+		return nil, errors.New("empty name for apple provider not allowed")
 	}
 
-	err := ah.InitPrivateKey()
+	if p.L == nil {
+		p.L = logger.NoOp
+	}
+
+	// configuring default values for userAgent
+	if appleCfg.UserAgent == "" {
+		appleCfg.UserAgent = defaultUserAgent
+	}
+	if endpoints.AuthURL == "" {
+		endpoints.AuthURL = appleAuthUrl
+	}
+	if endpoints.TokenURL == "" {
+		endpoints.TokenURL = appleTokenURL
+	}
+	ah := AppleHandler{
+		Params: p,
+		name:   name,
+		conf: AppleConfig{
+			ClientID:           appleCfg.ClientID,
+			TeamID:             appleCfg.TeamID,
+			KeyID:              appleCfg.KeyID,
+			ClientSecretExpire: appleCfg.ClientSecretExpire,
+			UserAgent:          appleCfg.UserAgent,
+		},
+		endpoint: endpoints,
+		scopes:   scopes,
+		mapUser: func(claims jwt.MapClaims) token.User {
+			var usr token.User
+			if uid, ok := claims["sub"]; ok {
+				usr.ID = fmt.Sprintf("apple_%s", uid.(string))
+			}
+
+			if email, ok := claims["email"]; ok {
+				usr.Email = email.(string)
+			}
+			return usr
+		},
+	}
+
+	ah.scopes = scopes
+
+	if privateKeyLoader == nil {
+		return nil, errors.New("private key loader function undefined")
+	}
+	ah.PrivateKeyLoader = privateKeyLoader
+
+	err := ah.initPrivateKey()
 	return &ah, err
 }
 
 // setPrivateKey is the private method for assign keyID and private key to AppleHandler
-func (ah *AppleHandler) InitPrivateKey() error {
+func (ah *AppleHandler) initPrivateKey() error {
 	if ah.PrivateKeyLoader == nil {
 		return errors.New("private key loader interface is nil")
 	}
-	if ah.KeyID == "" {
+	if ah.conf.KeyID == "" {
 		return errors.New("keyID can't be empty")
 	}
 	sKey, err := ah.PrivateKeyLoader.LoadPrivateKey()
@@ -145,12 +201,12 @@ func (ah *AppleHandler) InitPrivateKey() error {
 	if block == nil {
 		return errors.New("empty block after decoding")
 	}
-	ah.privateKey, err = x509.ParsePKCS8PrivateKey(block.Bytes)
+	ah.conf.privateKey, err = x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		return err
 	}
 
-	ah.clientSecret, err = ah.generateClientSecret()
+	ah.conf.clientSecret, err = ah.generateClientSecret()
 	if err != nil {
 		return err
 	}
@@ -158,7 +214,7 @@ func (ah *AppleHandler) InitPrivateKey() error {
 }
 
 // Name of the provider
-func (ah *AppleHandler) Name() string { return ah.ProviderName }
+func (ah *AppleHandler) Name() string { return ah.name }
 
 // LoginHandler - GET */{provider-name}/login
 func (ah *AppleHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +247,7 @@ func (ah *AppleHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	if _, err := ah.TokenService.Set(w, claims); err != nil {
+	if _, err := ah.JwtService.Set(w, claims); err != nil {
 		rest.SendErrorJSON(w, r, ah.L, http.StatusInternalServerError, err, "failed to set token")
 		return
 	}
@@ -199,7 +255,7 @@ func (ah *AppleHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// return login url
 	loginURL, err := ah.prepareLoginURL(state, r.URL.Path)
 	if err != nil {
-		errMsg := fmt.Sprintf("prepare login url for [%s] provider failed", ah.ProviderName)
+		errMsg := fmt.Sprintf("prepare login url for [%s] provider failed", ah.name)
 		ah.Logf("[ERROR] %s", errMsg)
 		rest.SendErrorJSON(w, r, ah.L, http.StatusInternalServerError, err, errMsg)
 		return
@@ -221,7 +277,7 @@ func (ah AppleHandler) AuthHandler(w http.ResponseWriter, r *http.Request) {
 	state := r.FormValue("state") // state value which sent with auth request
 	code := r.FormValue("code")   //  client code for validation
 
-	oauthClaims, _, err := ah.TokenService.Get(r)
+	oauthClaims, _, err := ah.JwtService.Get(r)
 	if err != nil {
 		rest.SendErrorJSON(w, r, ah.L, http.StatusInternalServerError, err, "failed to get token")
 		return
@@ -256,13 +312,7 @@ func (ah AppleHandler) AuthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uid := tokenClaims["sub"]
-	//name:=claims["name"]
-	//email:=claims["email"]
-
-	u := token.User{
-		ID: uid.(string),
-	}
+	u := ah.mapUser(tokenClaims)
 
 	cid, err := randToken()
 	if err != nil {
@@ -272,14 +322,14 @@ func (ah AppleHandler) AuthHandler(w http.ResponseWriter, r *http.Request) {
 	claims := token.Claims{
 		User: &u,
 		StandardClaims: jwt.StandardClaims{
-			Issuer:   ah.ProviderName,
+			Issuer:   ah.Issuer,
 			Id:       cid,
 			Audience: oauthClaims.Audience,
 		},
-		SessionOnly: oauthClaims.SessionOnly,
+		SessionOnly: false,
 	}
 
-	if _, err = ah.TokenService.Set(w, claims); err != nil {
+	if _, err = ah.JwtService.Set(w, claims); err != nil {
 		rest.SendErrorJSON(w, r, ah.L, http.StatusInternalServerError, err, "failed to set token")
 		return
 	}
@@ -297,11 +347,11 @@ func (ah AppleHandler) AuthHandler(w http.ResponseWriter, r *http.Request) {
 
 // LogoutHandler - GET /logout
 func (ah AppleHandler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
-	if _, _, err := ah.TokenService.Get(r); err != nil {
+	if _, _, err := ah.JwtService.Get(r); err != nil {
 		rest.SendErrorJSON(w, r, ah.L, http.StatusForbidden, err, "logout not allowed")
 		return
 	}
-	ah.TokenService.Reset(w)
+	ah.JwtService.Reset(w)
 }
 
 // VerifyWebToken sends the WebValidationTokenRequest and gets validation result
@@ -310,29 +360,29 @@ func (ah *AppleHandler) exchange(ctx context.Context, code, redirectURI string, 
 	// check jwt is expired ang recreate new JWT if need
 	ok, err := ah.isClientSecretExpired()
 	if err != nil || ok {
-		jwt, err := ah.generateClientSecret()
+		jToken, err := ah.generateClientSecret()
 		if err != nil {
 			return err
 		}
-		ah.clientSecret = jwt
+		ah.conf.clientSecret = jToken
 	}
 
 	data := url.Values{}
-	data.Set("client_id", ah.ClientID)
-	data.Set("client_secret", ah.clientSecret)
+	data.Set("client_id", ah.conf.ClientID)
+	data.Set("client_secret", ah.conf.clientSecret)
 	data.Set("code", code)
 	data.Set("redirect_uri", redirectURI) // redirect URL can't refer to localhost and must have trusted https certificated
 	data.Set("grant_type", "authorization_code")
 
 	client := http.Client{Timeout: time.Second * 5}
-	req, err := http.NewRequestWithContext(ctx, "POST", appleValidationURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", appleTokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return err
 	}
 
 	req.Header.Add("content-type", ContentType)
 	req.Header.Add("accept", AcceptHeader)
-	req.Header.Add("user-agent", ah.UserAgent) // apple requires a user agent
+	req.Header.Add("user-agent", ah.conf.UserAgent) // apple requires a user agent
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -345,19 +395,23 @@ func (ah *AppleHandler) exchange(ctx context.Context, code, redirectURI string, 
 	}
 
 	err = json.NewDecoder(res.Body).Decode(result)
-	defer res.Body.Close()
+	defer func() {
+		if err := res.Body.Close(); err != nil {
+			ah.L.Logf("[ERROR] close request body failed when get access token: %v", err)
+		}
+	}()
 	return err
 }
 
 // GetUniqueID decodes the id_token response and returns the unique from "sub" claim to identify the user
 func (ah AppleHandler) getTokenClaims(idToken string) (jwt.MapClaims, error) {
-	token, _, err := new(jwt.Parser).ParseUnverified(idToken, jwt.MapClaims{})
+	tkn, _, err := new(jwt.Parser).ParseUnverified(idToken, jwt.MapClaims{})
 
 	if err != nil {
 		return nil, err
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
+	claims, ok := tkn.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, errors.New("can't convert token claims to standard claims")
 	}
@@ -372,31 +426,31 @@ func (ah *AppleHandler) generateClientSecret() (string, error) {
 	now := time.Now()
 	exp := now.Add(time.Second * 86400).Unix() // default value
 
-	if ah.ClientSecretExpire != 0 {
-		exp = now.Add(time.Second * time.Duration(ah.ClientSecretExpire)).Unix()
+	if ah.conf.ClientSecretExpire != 0 {
+		exp = now.Add(time.Second * time.Duration(ah.conf.ClientSecretExpire)).Unix()
 	}
 
 	claims := &jwt.StandardClaims{
-		Issuer:    ah.TeamID,
+		Issuer:    ah.conf.TeamID,
 		IssuedAt:  now.Unix(),
 		ExpiresAt: exp,
 		Audience:  "https://appleid.apple.com",
-		Subject:   ah.ClientID,
+		Subject:   ah.conf.ClientID,
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-	token.Header["alg"] = "ES256"
-	token.Header["kid"] = ah.KeyID
+	tkn := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	tkn.Header["alg"] = "ES256"
+	tkn.Header["kid"] = ah.conf.KeyID
 
-	return token.SignedString(ah.privateKey)
+	return tkn.SignedString(ah.conf.privateKey)
 }
 
 func (ah *AppleHandler) isClientSecretExpired() (bool, error) {
-	token, _, err := new(jwt.Parser).ParseUnverified(ah.clientSecret, jwt.MapClaims{})
+	tkn, _, err := new(jwt.Parser).ParseUnverified(ah.conf.clientSecret, jwt.MapClaims{})
 	if err != nil {
 		return false, err
 	}
-	claims, ok := token.Claims.(jwt.MapClaims)
+	claims, ok := tkn.Claims.(jwt.MapClaims)
 	if !ok {
 		return false, errors.New("can't convert token claims to standard claims")
 	}
@@ -442,8 +496,8 @@ func (ah *AppleHandler) prepareLoginURL(state, path string) (string, error) {
 	query.Set("state", state)
 	query.Set("response_type", "code")
 	query.Set("response_mode", "form_post")
-	query.Set("client_id", ah.ClientID)
-	query.Set("scope", extractScopeFn(ah.Scopes))
+	query.Set("client_id", ah.conf.ClientID)
+	query.Set("scope", extractScopeFn(ah.scopes))
 	query.Set("redirect_uri", ah.makeRedirURL(path))
 	authURL.RawQuery = query.Encode()
 	return authURL.String(), nil
