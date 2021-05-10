@@ -482,6 +482,7 @@ func (ah *AppleHandler) isClientSecretExpired() (bool, error) {
 	}
 	return claims.VerifyExpiresAt(time.Now().Unix(), true), nil
 }
+
 func (ah *AppleHandler) parseUserData(user *token.User, jUser string) {
 
 	type UserData struct {
