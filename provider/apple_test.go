@@ -41,10 +41,11 @@ func TestAppleHandler_NewApple(t *testing.T) {
 		KeyID:              "BS2A79VCTT",
 		UserAgent:          "test-user-agent",
 		ClientSecretExpire: 3600,
+		Scopes:             []string{"name", "email"},
 	}
 	cl := customLoader{}
-	scopes := []string{"name", "email"}
-	ah, err := NewApple("apple-provider-test", p, aCfg, scopes, oauth2.Endpoint{}, cl)
+
+	ah, err := NewApple("apple-provider-test", p, aCfg, oauth2.Endpoint{}, cl)
 	assert.NoError(t, err)
 	assert.IsType(t, &AppleHandler{}, ah)
 	assert.Equal(t, ah.name, "apple-provider-test")
@@ -105,9 +106,10 @@ Ivx5tHkv
 		KeyID:              "BS2A79VCTT",
 		UserAgent:          "test-user-agent",
 		ClientSecretExpire: 3600,
+		Scopes:             []string{"name", "email"},
 	}
-	scopes := []string{"name", "email"}
-	ah, err := NewApple("apple-provider-test", p, aCfg, scopes, oauth2.Endpoint{}, LoadApplePrivateKeyFromFile(tmpfn))
+
+	ah, err := NewApple("apple-provider-test", p, aCfg, oauth2.Endpoint{}, LoadApplePrivateKeyFromFile(tmpfn))
 	assert.NoError(t, err)
 	assert.IsType(t, &AppleHandler{}, ah)
 	assert.Equal(t, ah.name, "apple-provider-test")
@@ -326,10 +328,10 @@ func prepareAppleHandlerTest() (*AppleHandler, error) {
 		KeyID:              "BS2A79VCTT",
 		UserAgent:          "test-user-agent",
 		ClientSecretExpire: 3600,
+		Scopes:             []string{"name", "email"},
 	}
 	cl := customLoader{}
-	scopes := []string{"name", "email"}
-	return NewApple("apple-provider-test", p, aCfg, scopes, oauth2.Endpoint{}, cl)
+	return NewApple("apple-provider-test", p, aCfg, oauth2.Endpoint{}, cl)
 }
 
 func prepareAppleOauthTest(t *testing.T, loginPort, authPort int) func() {
