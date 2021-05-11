@@ -27,7 +27,7 @@ type customLoader struct{} // implement custom private key loader interface
 
 func TestAppleHandler_NewApple(t *testing.T) {
 
-	testIdToken := `eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ0ZXN0LmF1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMDExMjIuNzg5M2Y3NmViZWRjNDExOGE3OTE3ZGFiOWE4YTllYTkuMTEyMiIsImlzcyI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJleHAiOiIxOTIwNjQ3MTgyIiwiaWF0IjoiMTYyMDYzNzE4MiIsImVtYWlsIjoidGVzdEBlbWFpbC5jb20ifQ.CQCPa7ov-IdZ5bEKfhhnxEXafMAM_t6mj5OAnaoyy0A`
+	testIDToken := `eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJ0ZXN0LmF1dGguZXhhbXBsZS5jb20iLCJzdWIiOiIwMDExMjIuNzg5M2Y3NmViZWRjNDExOGE3OTE3ZGFiOWE4YTllYTkuMTEyMiIsImlzcyI6Imh0dHBzOi8vYXBwbGVpZC5hcHBsZS5jb20iLCJleHAiOiIxOTIwNjQ3MTgyIiwiaWF0IjoiMTYyMDYzNzE4MiIsImVtYWlsIjoidGVzdEBlbWFpbC5jb20ifQ.CQCPa7ov-IdZ5bEKfhhnxEXafMAM_t6mj5OAnaoyy0A` // #nosec
 	p := Params{
 		URL:     "http://localhost",
 		Issuer:  "test-issuer",
@@ -53,7 +53,7 @@ func TestAppleHandler_NewApple(t *testing.T) {
 	assert.NotEmpty(t, ah.conf.privateKey)
 	assert.NotEmpty(t, ah.conf.clientSecret)
 
-	tknClaims, err := ah.getTokenClaims(testIdToken)
+	tknClaims, err := ah.getTokenClaims(testIDToken)
 	assert.NoError(t, err)
 
 	// testing mapUser
@@ -71,14 +71,14 @@ MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQgTxaHXzyuM85Znw7y
 SJ9XeeC8gqcpE/VLhZHGsnPPiPagCgYIKoZIzj0DAQehRANCAATnwlOv7I6eC3Ec
 /+GeYXT+hbcmhEVveDqLmNcHiXCR9XxJZXtpMRlcRfY8eaJpUdig27dfsbvpnfX5
 Ivx5tHkv
------END PRIVATE KEY-----`
+-----END PRIVATE KEY-----` // #nosec
 	testPrivKeyFileName := "privKeyTest.tmp"
 
 	dir, err := ioutil.TempDir(os.TempDir(), testPrivKeyFileName)
 	assert.NoError(t, err)
 	assert.NotNil(t, dir)
 	if err != nil {
-		log.Fatal(err)
+		require.NoError(t, err)
 		return
 	}
 
@@ -87,9 +87,8 @@ Ivx5tHkv
 	}()
 
 	tmpfn := filepath.Join(dir, testPrivKeyFileName)
-	if err = ioutil.WriteFile(tmpfn, []byte(testValidKey), 0666); err != nil {
-		assert.NoError(t, err)
-		log.Fatal(err)
+	if err = ioutil.WriteFile(tmpfn, []byte(testValidKey), 0600); err != nil {
+		require.NoError(t, err)
 		return
 	}
 	assert.NoError(t, err)
@@ -135,8 +134,8 @@ func TestAppleHandlerGenerateClientSecret(t *testing.T) {
 }
 
 func TestAppleHandlerIsTokenExpire(t *testing.T) {
-	expiredToken := `eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnby10ZXN0IiwiaWF0IjoxNjIwNjQxMDUyLCJleHAiOjE2MjA2NDExMjgsImF1ZCI6ImdpdGh1Yi5jb20vZ28tcGtnei9hdXRoIiwic3ViIjoiZ29sYW5nQHRlc3QuY29tIn0.ZPDgw9pnJGbc3ez-EFVsFHRwlv0s0K7VjKKbEPsGCS0`
-	validToken := `eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnby10ZXN0IiwiaWF0IjoxNjIwNjQxMDUyLCJleHAiOjQwODIwOTA3NTEsImF1ZCI6ImdpdGh1Yi5jb20vZ28tcGtnei9hdXRoIiwic3ViIjoiZ29sYW5nQHRlc3QuY29tIn0.tY9FB-DNSuv1y0PcpOgwcgnxxV-RJbrRSOb5b-4RiGQ`
+	expiredToken := `eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnby10ZXN0IiwiaWF0IjoxNjIwNjQxMDUyLCJleHAiOjE2MjA2NDExMjgsImF1ZCI6ImdpdGh1Yi5jb20vZ28tcGtnei9hdXRoIiwic3ViIjoiZ29sYW5nQHRlc3QuY29tIn0.ZPDgw9pnJGbc3ez-EFVsFHRwlv0s0K7VjKKbEPsGCS0` // #nosec
+	validToken := `eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnby10ZXN0IiwiaWF0IjoxNjIwNjQxMDUyLCJleHAiOjQwODIwOTA3NTEsImF1ZCI6ImdpdGh1Yi5jb20vZ28tcGtnei9hdXRoIiwic3ViIjoiZ29sYW5nQHRlc3QuY29tIn0.tY9FB-DNSuv1y0PcpOgwcgnxxV-RJbrRSOb5b-4RiGQ`   // #nosec
 
 	ah, err := prepareAppleHandlerTest()
 	assert.NoError(t, err)
@@ -275,8 +274,6 @@ SJ9XeeC8gqcpE/VLhZHGsnPPiPagCgYIKoZIzj0DAQehRANCAATnwlOv7I6eC3Ec
 Ivx5tHkv
 -----END PRIVATE KEY-----`)
 
-	//testWrongKey := []byte(`MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAJJC+7viVTZtE1yM0IX+Zt8ZNJW6RYLg8fovmEo8AfDo+dvE/ssFSiMSqRcmHhp5y0K+LHAy9QSz8lrIivdPC19LEc9dFUzAM3aCKpVCAbz51OCYRV6/01kyMPiIMYItG1RufF+XJCYHxHZY9JyuheOgGaqmdOIZQmcTwk6r3VYtAgMBAAECgYAuJ5caxiSPxUHr3b/b2NkLo/+VFC/lSijyA1zyaBdQt6RJNtQUqvmnMbdMR8oOHssGp86MJXhuYH6lKU25FyeGEReXIuvoz25z1mLUxbzSAjuWWNq32sfuBx+sYMUMKrt0W0wJrbofRwIElTDaFBXP/arycALT323hWAOp5RKo/QJBAO0tAEBgvq9VqakVHo8pnoN+MFKIQ8pl03zvHWRFmxIsPj1iCO8JeHnRVhr2V8mpHwx+/oHwFDYQWG57FniH8cMCQQCd3sP3EvTwgXctpUNLxfzURZMEOxXEE84iUM2UkrQ4Sb7tJwCEezfIofC7GPQv1yJ8hN9guX0W+lgmiNbScKlPAkBPmkb3VIErf+jNoxT6n9Ff+L5nNOzrxXlR+T84JFSDqO3K1FiDQf55hFUN/5g/Ss/s9cKeAeIGsz269vz3v0jZAkBmlO7vaEEC2o1vepic7xzXbhIWyLHfBCOIxsqfBSjX/otynEpIy6w20YuUd6WMRJXjJY/k0QLIYInRGE/G1HAfAkEAx3UnSl/XLJLXkNawVNhgxWgQWpb7st5rug+MUVqtj3Qtfp55GswBzvHaaMCJOizZc+UjWc4fhRLoi3prBAKAXA==`)
-
 	return testValidKey, nil
 }
 
@@ -298,7 +295,7 @@ Ivx5tHkv
 	}
 
 	filePath = filepath.Join(dir, testPrivKeyFileName)
-	if err = ioutil.WriteFile(filePath, []byte(testValidKey), 0666); err != nil {
+	if err = ioutil.WriteFile(filePath, []byte(testValidKey), 0600); err != nil {
 		assert.NoError(t, err)
 		log.Fatal(err)
 		return "", nil
@@ -391,6 +388,7 @@ func prepareAppleOauthTest(t *testing.T, loginPort, authPort int) func() {
 	count := 0
 	useIds := []string{"myuser1", "myuser2"} // user for first ans second calls
 
+	//nolint
 	oauth := &http.Server{
 		Addr: fmt.Sprintf(":%d", authPort),
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

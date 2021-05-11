@@ -1,8 +1,9 @@
+package provider
+
 // Implementation sign in with Apple for allow users to sign in to web services using their Apple ID.
 // For correct work this provider user must has Apple developer account and correct configure "sign in with Apple" at in
 // See more: https://developer.apple.com/documentation/sign_in_with_apple/sign_in_with_apple_rest_api
 // and https://developer.apple.com/documentation/sign_in_with_apple/sign_in_with_apple_js/incorporating_sign_in_with_apple_into_other_platforms
-package provider
 
 import (
 	"context"
@@ -28,14 +29,14 @@ import (
 )
 
 const (
-	// appleAuthUrl is the base authentication URL for sign in with Apple ID and fetch request code for user validation request.
-	appleAuthUrl = "https://appleid.apple.com/auth/authorize"
+	// appleAuthURL is the base authentication URL for sign in with Apple ID and fetch request code for user validation request.
+	appleAuthURL = "https://appleid.apple.com/auth/authorize"
 
 	// appleTokenURL is the endpoint for verifying tokens and get user unique ID and E-mail
-	appleTokenURL = "https://appleid.apple.com/auth/token"
+	appleTokenURL = "https://appleid.apple.com/auth/token" // #nosec
 
-	// apple REST API accept only from-data with it content-type
-	ContentType = "application/x-www-form-urlencoded"
+	// appleRequestContentType is the valid type which apple REST API accept only
+	appleRequestContentType = "application/x-www-form-urlencoded"
 
 	// UserAgent required to every request to Apple REST API
 	defaultUserAgent = "github.com/go-pkgz/auth"
@@ -44,7 +45,7 @@ const (
 	AcceptHeader = "application/json"
 )
 
-// VerificationResponse is based on https://developer.apple.com/documentation/signinwithapplerestapi/tokenresponse
+// AppleVerificationResponse is based on https://developer.apple.com/documentation/signinwithapplerestapi/tokenresponse
 type AppleVerificationResponse struct {
 	// A token used to access allowed user data, but now not implemented public interface for it.
 	AccessToken string `json:"access_token"`
@@ -99,13 +100,13 @@ type PrivateKeyLoaderInterface interface {
 	LoadPrivateKey() ([]byte, error)
 }
 
-// PrivateKeyLoaderFunc is the built-in type for use pre-defined private key loader function
-// Path to key file must be set
+// LoadFromFileFunc is the built-in type for use pre-defined private key loader function
+// Path field must be set with actual path to private key file
 type LoadFromFileFunc struct {
 	Path string
 }
 
-// AppleLoadPrivateKeyFromFile return instance for built-in loader function from local file
+// LoadApplePrivateKeyFromFile return instance for built-in loader function from local file
 func LoadApplePrivateKeyFromFile(path string) LoadFromFileFunc {
 	return LoadFromFileFunc{
 		Path: path,
@@ -127,7 +128,7 @@ func (lf LoadFromFileFunc) LoadPrivateKey() ([]byte, error) {
 		return nil, err
 	}
 	err = kFile.Close()
-	return keyValue, nil
+	return keyValue, err
 }
 
 // NewApple create new AppleProvider with custom name and parameters
@@ -148,7 +149,7 @@ func NewApple(name string, p Params, appleCfg AppleConfig, endpoints oauth2.Endp
 		appleCfg.UserAgent = defaultUserAgent
 	}
 	if endpoints.AuthURL == "" {
-		endpoints.AuthURL = appleAuthUrl
+		endpoints.AuthURL = appleAuthURL
 	}
 	if endpoints.TokenURL == "" {
 		endpoints.TokenURL = appleTokenURL
@@ -257,7 +258,7 @@ func (ah *AppleHandler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	if _, err := ah.JwtService.Set(w, claims); err != nil {
+	if _, err = ah.JwtService.Set(w, claims); err != nil {
 		rest.SendErrorJSON(w, r, ah.L, http.StatusInternalServerError, err, "failed to set token")
 		return
 	}
@@ -291,7 +292,7 @@ func (ah AppleHandler) AuthHandler(w http.ResponseWriter, r *http.Request) {
 	// response with user name filed return only one time at first login, next login  field user doesn't exist
 	// until user delete sign with Apple ID in account profile (security section)
 	// example response: {"name":{"firstName":"Chan","lastName":"Lu"},"email":"user@email.com"}
-	jUser := r.FormValue("user")  // json string with user name
+	jUser := r.FormValue("user") // json string with user name
 
 	oauthClaims, _, err := ah.JwtService.Get(r)
 	if err != nil {
@@ -382,11 +383,10 @@ func (ah *AppleHandler) exchange(ctx context.Context, code, redirectURI string, 
 	// check jwt is expired ang recreate new JWT if need
 	ok, err := ah.isClientSecretExpired()
 	if err != nil || !ok {
-		jToken, err := ah.generateClientSecret()
+		ah.conf.clientSecret, err = ah.generateClientSecret()
 		if err != nil {
 			return err
 		}
-		ah.conf.clientSecret = jToken
 	}
 
 	data := url.Values{}
@@ -402,7 +402,7 @@ func (ah *AppleHandler) exchange(ctx context.Context, code, redirectURI string, 
 		return err
 	}
 
-	req.Header.Add("content-type", ContentType)
+	req.Header.Add("content-type", appleRequestContentType)
 	req.Header.Add("accept", AcceptHeader)
 	req.Header.Add("user-agent", ah.conf.UserAgent) // apple requires a user agent
 
@@ -413,12 +413,12 @@ func (ah *AppleHandler) exchange(ctx context.Context, code, redirectURI string, 
 
 	// Apple REST API response either 200 (ok OK) or 400 (if error)
 	if res.StatusCode >= 400 {
-		return errors.New(fmt.Sprintf("exchange response error code: %d", res.StatusCode))
+		return fmt.Errorf("exchange response error code: %d", res.StatusCode)
 	}
 
 	err = json.NewDecoder(res.Body).Decode(result)
 	defer func() {
-		if err := res.Body.Close(); err != nil {
+		if err = res.Body.Close(); err != nil {
 			ah.L.Logf("[ERROR] close request body failed when get access token: %v", err)
 		}
 	}()
