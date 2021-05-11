@@ -1,7 +1,7 @@
 # auth - authentication via oauth2, direct and email
 [![Build Status](https://github.com/go-pkgz/auth/workflows/build/badge.svg)](https://github.com/go-pkgz/auth/actions) [![Coverage Status](https://coveralls.io/repos/github/go-pkgz/auth/badge.svg?branch=master)](https://coveralls.io/github/go-pkgz/auth?branch=master) [![godoc](https://godoc.org/github.com/go-pkgz/auth?status.svg)](https://pkg.go.dev/github.com/go-pkgz/auth?tab=doc)
 
-This library provides "social login" with Github, Google, Facebook, Microsoft, Twitter, Yandex, Battle.net and Telegram as well as custom auth providers and email verification.
+This library provides "social login" with Github, Google, Facebook, Microsoft, Twitter, Yandex, Battle.net, Apple and Telegram as well as custom auth providers and email verification.
 
 - Multiple oauth2 providers can be used at the same time
 - Special `dev` provider allows local testing and development
@@ -420,8 +420,63 @@ By default, this library doesn't print anything to stdout/stderr, however user c
 ## Register oauth2 providers
 
 Authentication handled by external providers. You should setup oauth2 for all (or some) of them to allow users to authenticate. It is not mandatory to have all of them, but at least one should be correctly configured.
+#### Apple Auth Provider
+For configure this provider user require Apple developer account (without it setting up sign in with Apple impossible). [Sign in with Apple](https://developer.apple.com/documentation/sign_in_with_apple/sign_in_with_apple_rest_api) lets users log in to your app using their two-factor authentication Apple ID.
 
-#### Google Auth Provider
+Follow to next steps for configure on Apple side: 
+
+1. At first you need login in to developer account and enable capabilities `Sign in with Apple" for specific App ID (in Certificates, Identifiers & Profiles section ).  Also you need `App ID Prefix` as TeamID value, it's required for configure Apple auth provider.
+
+2. Create Service ID and bind App ID which has enabled capabilities `Sign in with Apple". Description field value will be display for end users when one doing sign in. `Identifier` of  created service is a `Client ID`.
+
+3. Configure `Sign in with Apple` for created `Service ID`. Add domain which use auth with Apple provider. Domain must available only by `https`, on the standart port `443` (other ports not accepted) only, has trusted certificate (self-signed certificate not allowed) and support TLS 1.2 or higher. Also you need add redirect URLs. It's must be registered with the `https` protocol only and trusted certificate.
+
+4. Register a New Key (private key) for `Sign in with Apple` feature and download it. After create a download a key impossible. Remember `Key ID`. This  key use for create [JWT](https://developer.apple.com/documentation/sign_in_with_apple/generate_and_validate_tokens#3262048) `Client Secret`
+
+5. You need verify SPF (DNS record) for domain which used for `Sign in with Apple` `Service ID`. It's can be done it in `Certificates, Identifiers & Profiles` >> `More` section.
+
+After complete previous steps you can go to configure `Apple auth provider`. For it require parameters which must set in `AppleConfig`:
+
+* Client ID - Service ID identifier which use for `Sign with Apple`
+* Team ID - Identifier a developer account (use as prefix for all App ID)
+* Key ID - Identifier a generated key for `Sign with Apple`
+* Scopes - The [scope](https://developer.apple.com/documentation/sign_in_with_apple/clientconfigi/3230955-scope) is the amount of user information requested from Apple. Right now, there are only two options name and email. You can request the user’s name or email. You can also choose to request both or neither.
+
+```go 
+    // apple config parameters  
+	appleCfg := provider.AppleConfig{
+		ClientID: os.Getenv("AEXMPL_APPLE_CID"), // service indentifier
+		TeamID:   os.Getenv("AEXMPL_APPLE_TID"), // developer account indentifier
+		KeyID:    os.Getenv("AEXMPL_APPLE_KEYID"), // private key identifier
+		Scopes:   []string{"name", "email"},
+	}  
+```
+**Notice:** If at least one parameter missed auth doesn't will be work 
+
+Then add Apple provider which accept required parameters:
+* `Name (string)`
+* `appleConfig (AppleConfig)`
+* `privateKeyLoader (PrivateKeyLoaderInterface)`
+
+`PrivateKeyLoaderInterface` used to [implement](https://github.com/zebox/auth/blob/master/provider/apple.go#L98:L100) custom loader for private key (which was generated on step 4) used for create `client_secret`. 
+Also, user can use pre-defined function `provider.LoadApplePrivateKeyFromFile(filePath string)` for load private key from local file.
+
+`AddAppleProvide` try to load private key at call and return error if load failed. Always check error when call this provider.    
+  
+```go
+    if err := service.AddAppleProvider("apple", appleCfg, provider.LoadApplePrivateKeyFromFile(os.Getenv("AEXMPL_APPLE_PRIVKEY_PATH"))); err != nil {
+		log.Fatalf("[ERROR] create AppleProvider failed: %v", err)
+	}
+```
+**Limitation:** 
+* Map a userName (if specific scope defined) can be only at first login for a user. 
+Every next login with Apple, under account which sign in early, will no return field with userName and provider can't fetch user name until a user delete sign in for you service with Apple ID in  Apple account profile (security section).
+Provider always get user `UID` (`sub` claim) and `email` (if email scope defined) from claims of `IDToken`.
+
+* Apple hasn't API for fetch avatar and user info. 
+
+See [example](https://github.com/zebox/auth/blob/master/_example/main.go#L83:L93) before use.                           
+#### Google Auth Provide
 
 1.  Create a new project: https://console.developers.google.com/project
 2.  Choose the new project from the top right project dropdown (only if another project is selected)
